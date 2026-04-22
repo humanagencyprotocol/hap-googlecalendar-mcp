@@ -1,0 +1,49 @@
+{
+  "name": "@humanagencyp/google-calendar-mcp",
+  "version": "0.1.0",
+  "description": "Google Calendar MCP server for the Human Agency Protocol — list, create, update, and delete calendar events with HAP-bounded authority",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "google-calendar-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --outDir dist --clean",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build",
+    "release:patch": "npm version patch && git push --follow-tags",
+    "release:minor": "npm version minor && git push --follow-tags",
+    "release:major": "npm version major && git push --follow-tags"
+  },
+  "keywords": [
+    "mcp",
+    "google-calendar",
+    "hap",
+    "human-agency-protocol",
+    "ai-agents"
+  ],
+  "author": "Andreas Schadauer",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/humanagencyprotocol/hap-googlecalendar-mcp.git"
+  },
+  "homepage": "https://github.com/humanagencyprotocol/hap-googlecalendar-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/humanagencyprotocol/hap-googlecalendar-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}

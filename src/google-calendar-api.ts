@@ -1,21 +1,75 @@
 /**
  * Google Calendar API client — Calendar v3 REST.
  *
- * Auth: reads OAuth2 access token from GOOGLE_CALENDAR_ACCESS_TOKEN env var.
- * The HAP gateway injects the token at spawn time after the user completes
- * the OAuth flow in the UI; the vault is the source of truth.
+ * Auth: exchanges OAuth2 refresh_token → short-lived access_token on each
+ * call (cached until expiry). The HAP gateway injects client_id, client_secret
+ * and refresh_token as env vars after the user completes the OAuth flow in
+ * the UI; the vault is the source of truth.
+ *
+ * Env vars:
+ *   GOOGLE_CLIENT_ID
+ *   GOOGLE_CLIENT_SECRET
+ *   GOOGLE_CALENDAR_REFRESH_TOKEN
  */
 
 const API_BASE = 'https://www.googleapis.com/calendar/v3';
+const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
-function getAccessToken(): string {
-  const token = process.env.GOOGLE_CALENDAR_ACCESS_TOKEN;
-  if (!token) throw new Error('GOOGLE_CALENDAR_ACCESS_TOKEN not set');
-  return token;
+interface TokenCache {
+  accessToken: string;
+  expiresAt: number; // epoch ms
 }
 
-function authHeader(): Record<string, string> {
-  return { Authorization: `Bearer ${getAccessToken()}` };
+let tokenCache: TokenCache | null = null;
+// Refresh 60s before actual expiry so a request that starts just under the wire
+// doesn't land on an expired token server-side.
+const TOKEN_SKEW_MS = 60_000;
+
+async function getAccessToken(): Promise<string> {
+  const now = Date.now();
+  if (tokenCache && tokenCache.expiresAt - TOKEN_SKEW_MS > now) {
+    return tokenCache.accessToken;
+  }
+
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN;
+  if (!clientId || !clientSecret || !refreshToken) {
+    const missing: string[] = [];
+    if (!clientId) missing.push('GOOGLE_CLIENT_ID');
+    if (!clientSecret) missing.push('GOOGLE_CLIENT_SECRET');
+    if (!refreshToken) missing.push('GOOGLE_CALENDAR_REFRESH_TOKEN');
+    throw new Error(`Missing OAuth env vars: ${missing.join(', ')}`);
+  }
+
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`OAuth refresh failed (${res.status}): ${body}`);
+  }
+  const data = await res.json() as { access_token: string; expires_in: number; error?: string };
+  if (data.error || !data.access_token) {
+    throw new Error(`OAuth refresh error: ${data.error ?? 'no access_token in response'}`);
+  }
+
+  tokenCache = {
+    accessToken: data.access_token,
+    expiresAt: now + (data.expires_in * 1000),
+  };
+  return tokenCache.accessToken;
+}
+
+async function authHeader(): Promise<Record<string, string>> {
+  return { Authorization: `Bearer ${await getAccessToken()}` };
 }
 
 async function handle<T>(res: Response, op: string): Promise<T> {
@@ -61,7 +115,7 @@ export interface CalendarEvent {
 // ─── Calendars ───────────────────────────────────────────────────────────────
 
 export async function listCalendars(): Promise<CalendarListEntry[]> {
-  const res = await fetch(`${API_BASE}/users/me/calendarList`, { headers: authHeader() });
+  const res = await fetch(`${API_BASE}/users/me/calendarList`, { headers: await authHeader() });
   const data = await handle<{ items: CalendarListEntry[] }>(res, 'list_calendars');
   return data.items ?? [];
 }
@@ -89,7 +143,7 @@ export async function listEvents(params: ListEventsParams = {}): Promise<Calenda
   if (params.orderBy) qs.set('orderBy', params.orderBy);
 
   const url = `${API_BASE}/calendars/${cal}/events${qs.toString() ? `?${qs.toString()}` : ''}`;
-  const res = await fetch(url, { headers: authHeader() });
+  const res = await fetch(url, { headers: await authHeader() });
   const data = await handle<{ items: CalendarEvent[] }>(res, 'list_events');
   return data.items ?? [];
 }
@@ -97,7 +151,7 @@ export async function listEvents(params: ListEventsParams = {}): Promise<Calenda
 export async function getEvent(calendarId: string, eventId: string): Promise<CalendarEvent> {
   const cal = encodeURIComponent(calendarId);
   const evt = encodeURIComponent(eventId);
-  const res = await fetch(`${API_BASE}/calendars/${cal}/events/${evt}`, { headers: authHeader() });
+  const res = await fetch(`${API_BASE}/calendars/${cal}/events/${evt}`, { headers: await authHeader() });
   return handle<CalendarEvent>(res, 'get_event');
 }
 
@@ -118,7 +172,7 @@ export async function createEvent(params: CreateEventParams): Promise<CalendarEv
   const { calendarId: _cid, sendUpdates: _s, ...body } = params;
   const res = await fetch(`${API_BASE}/calendars/${cal}/events${qs}`, {
     method: 'POST',
-    headers: { ...authHeader(), 'Content-Type': 'application/json' },
+    headers: { ...(await authHeader()), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   return handle<CalendarEvent>(res, 'create_event');
@@ -143,7 +197,7 @@ export async function updateEvent(params: UpdateEventParams): Promise<CalendarEv
   const { calendarId: _cid, eventId: _eid, sendUpdates: _s, ...body } = params;
   const res = await fetch(`${API_BASE}/calendars/${cal}/events/${evt}${qs}`, {
     method: 'PATCH',
-    headers: { ...authHeader(), 'Content-Type': 'application/json' },
+    headers: { ...(await authHeader()), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   return handle<CalendarEvent>(res, 'update_event');
@@ -159,7 +213,7 @@ export async function deleteEvent(
   const qs = sendUpdates ? `?sendUpdates=${sendUpdates}` : '';
   const res = await fetch(`${API_BASE}/calendars/${cal}/events/${evt}${qs}`, {
     method: 'DELETE',
-    headers: authHeader(),
+    headers: await authHeader(),
   });
   if (!res.ok) {
     const body = await res.text();
@@ -187,7 +241,7 @@ export async function freeBusy(query: FreeBusyQuery): Promise<FreeBusyResponse> 
   };
   const res = await fetch(`${API_BASE}/freeBusy`, {
     method: 'POST',
-    headers: { ...authHeader(), 'Content-Type': 'application/json' },
+    headers: { ...(await authHeader()), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   return handle<FreeBusyResponse>(res, 'free_busy');

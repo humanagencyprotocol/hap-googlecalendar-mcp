@@ -1,6 +1,6 @@
 {
   "name": "@humanagencyp/google-calendar-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Google Calendar MCP server for the Human Agency Protocol — list, create, update, and delete calendar events with HAP-bounded authority",
   "type": "module",
   "main": "dist/index.js",

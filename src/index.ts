@@ -101,7 +101,7 @@ server.tool(
 
 server.tool(
   'create_event',
-  'Create a new calendar event.',
+  'Create a new calendar event. `duration_minutes` and `lookahead_days` MUST match start/end — HAP gates on them against booking_duration_max and lookahead_days_max.',
   {
     calendarId: z.string().optional().describe('Calendar ID (default: "primary")'),
     summary: z.string().describe('Event title'),
@@ -117,12 +117,18 @@ server.tool(
       date: z.string().optional(),
       timeZone: z.string().optional(),
     }).describe('Event end (exactly one of dateTime or date)'),
+    duration_minutes: z.number().int().positive().describe('Event duration in minutes. Agent must compute this from start/end — it is checked against the HAP booking_duration_max bound.'),
+    lookahead_days: z.number().int().nonnegative().describe('Number of days from today until the event starts (0 = today). Checked against the HAP lookahead_days_max bound.'),
     attendees: z.array(z.object({ email: z.string().email() })).optional(),
     sendUpdates: z.enum(['all', 'externalOnly', 'none']).optional().describe('Who to notify (default: none)'),
   },
   async (args) => {
+    // `duration_minutes` and `lookahead_days` are HAP gating fields — already
+    // enforced by the gateway before this handler runs. They're not part of
+    // the Google Calendar API payload, so strip them before forwarding.
+    const { duration_minutes: _dm, lookahead_days: _ld, ...rest } = args;
     try {
-      const event = await api.createEvent(args);
+      const event = await api.createEvent(rest);
       return ok(`Event created. ID: ${event.id}\nLink: ${event.htmlLink ?? '(none)'}`);
     } catch (e) { return err(e); }
   },

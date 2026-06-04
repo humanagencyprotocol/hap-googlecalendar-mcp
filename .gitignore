@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Local TLS dev certs (mkcert) — never commit private keys
+*.pem

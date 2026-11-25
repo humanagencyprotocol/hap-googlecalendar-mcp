@@ -2,7 +2,7 @@
 
 Google Calendar MCP server for the [Human Agency Protocol](https://humanagencyprotocol.com).
 
-Exposes Google Calendar v3 operations as MCP tools. Designed for use inside the [HAP gateway](https://github.com/humanagencyprotocol/hap-gateway), which gates each tool against an active `calendar@0.4` attestation and injects the OAuth access token from its encrypted vault.
+Exposes Google Calendar v3 operations as MCP tools. Designed for use inside the [Suveren's gateway](https://github.com/suverenai/suveren-gateway), which gates each tool against an active `calendar@0.6` mandate and injects the OAuth access token from its encrypted vault.
 
 ## Tools
 
